@@ -1,0 +1,17 @@
+# Binaries
+bin/
+dist/
+
+# Test binary
+*.test
+*.out
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Logs
+*.log

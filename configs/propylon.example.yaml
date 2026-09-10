@@ -1,0 +1,77 @@
+# Propylon Gateway Configuration Example
+version: "v1"
+
+server:
+  addr: "0.0.0.0:8080"
+  mode: "http" # Options: http, sse, stdio
+  read_timeout: 30s
+  write_timeout: 30s
+
+# Audit & Telemetry
+audit:
+  enabled: true
+  output: "stdout" # Options: stdout, file
+  log_arguments: true
+  mask_sensitive_data: true
+
+# Upstream Backend Tools (MCP Servers / Tool APIs)
+upstreams:
+  - name: "database-service"
+    type: "mcp-sse"
+    target: "http://localhost:9001/sse"
+    description: "PostgreSQL Database MCP Server"
+
+  - name: "system-shell"
+    type: "mcp-stdio"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    description: "Filesystem & Shell Tool Provider"
+
+# Security & Governance Policies
+policies:
+  # Rule 1: High-risk command blocking
+  - id: "block-dangerous-bash"
+    name: "Block Destructive Shell Commands"
+    target_tools: ["execute_command", "run_bash", "shell"]
+    action: "block" # Options: block, allow, require_approval
+    conditions:
+      param_matches:
+        command:
+          - '(?i)rm\s+-rf\s+/'
+          - '(?i)mkfs'
+          - '(?i)dd\s+if='
+          - '(?i):\(\)\{\s*:\|\:&\s*\};:' # Fork bomb
+    message: "Security Policy Violation: Destructive shell command detected."
+
+  # Rule 2: SQL destructive query protection
+  - id: "guard-sql-mutation"
+    name: "Prevent Table Drops and Truncates"
+    target_tools: ["query_sql", "execute_query"]
+    action: "block"
+    conditions:
+      param_matches:
+        query:
+          - '(?i)\bDROP\s+TABLE\b'
+          - '(?i)\bTRUNCATE\b'
+          - '(?i)\bALTER\s+TABLE\b'
+    message: "Security Policy Violation: Schema drop/truncate operations are prohibited for autonomous agents."
+
+  # Rule 3: Human-in-the-Loop (HITL) interactive approval
+  - id: "require-approval-for-deploy"
+    name: "Require Human Approval for Production Deployments"
+    target_tools: ["deploy_service", "restart_cluster", "modify_config"]
+    action: "require_approval"
+    approval_channel: "terminal" # Options: terminal, webhook, slack
+    timeout: 60s
+    message: "Agent is requesting execution of a production-altering action. Awaiting human confirmation."
+
+  # Rule 4: Data Loss Prevention (DLP) Masking
+  - id: "dlp-mask-secrets"
+    name: "Mask API Keys and Credentials in Outputs"
+    target_tools: ["*"]
+    action: "mask"
+    masks:
+      - pattern: '(?i)(AKIA[0-9A-Z]{16})'
+        replacement: "[AWS_KEY_REDACTED]"
+      - pattern: '(?i)(sk-[a-zA-Z0-9]{32,})'
+        replacement: "[API_KEY_REDACTED]"
