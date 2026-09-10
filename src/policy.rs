@@ -2,11 +2,12 @@ use crate::config::PolicyConfig;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -35,6 +36,7 @@ pub struct Decision {
     pub reason: Option<String>,
     pub require_approval: bool,
     pub approval_prompt: Option<String>,
+    pub approval_channel: Option<String>,
 }
 
 #[derive(Debug)]
@@ -45,6 +47,7 @@ pub struct CompiledPolicy {
     pub match_all_tools: bool,
     pub action: Action,
     pub compiled_matches: HashMap<String, Vec<Regex>>,
+    pub approval_channel: Option<String>,
     pub message: String,
 }
 
@@ -87,6 +90,7 @@ impl PolicyEngine {
                 match_all_tools,
                 action: Action::from(cfg.action.as_str()),
                 compiled_matches,
+                approval_channel: cfg.approval_channel.clone(),
                 message: cfg.message.clone(),
             });
         }
@@ -133,6 +137,7 @@ impl PolicyEngine {
                             reason: Some(p.message.clone()),
                             require_approval: false,
                             approval_prompt: None,
+                            approval_channel: None,
                         };
                     }
                     Action::RequireApproval => {
@@ -146,6 +151,7 @@ impl PolicyEngine {
                                 "Agent requested tool '{}' with args {:?}. Policy: {}",
                                 tool_name, args, p.message
                             )),
+                            approval_channel: p.approval_channel.clone(),
                         };
                     }
                     _ => {}
@@ -160,6 +166,7 @@ impl PolicyEngine {
             reason: None,
             require_approval: false,
             approval_prompt: None,
+            approval_channel: None,
         }
     }
 }
@@ -195,4 +202,48 @@ pub async fn request_terminal_approval(prompt: &str, timeout_dur: Duration) -> b
             false
         }
     }
+}
+
+/// Dispatches an approval notification to a remote Webhook (e.g. Slack, Feishu, Security Dashboard).
+pub async fn dispatch_webhook_notification(
+    webhook_url: &str,
+    tool_name: &str,
+    args: &HashMap<String, Value>,
+    prompt: &str,
+    timeout_dur: Duration,
+) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(timeout_dur)
+        .build()?;
+
+    let payload = json!({
+        "event": "propylon_approval_required",
+        "tool": tool_name,
+        "arguments": args,
+        "prompt": prompt,
+        "timestamp": chrono_timestamp()
+    });
+
+    let resp = client.post(webhook_url).json(&payload).send().await;
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            info!(url = %webhook_url, "Successfully notified webhook approval channel");
+            Ok(())
+        }
+        Ok(r) => {
+            warn!(status = %r.status(), "Webhook returned non-200 status");
+            Ok(())
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to send webhook notification");
+            Ok(())
+        }
+    }
+}
+
+fn chrono_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

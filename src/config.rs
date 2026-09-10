@@ -12,6 +12,10 @@ pub struct Config {
     #[serde(default)]
     pub audit: AuditConfig,
     #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfig,
+    #[serde(default)]
+    pub webhook: WebhookConfig,
+    #[serde(default)]
     pub upstreams: Vec<UpstreamConfig>,
     #[serde(default)]
     pub policies: Vec<PolicyConfig>,
@@ -51,6 +55,56 @@ pub struct AuditConfig {
 
 fn default_output() -> String {
     "stdout".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircuitBreakerConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_max_calls")]
+    pub max_calls_per_minute: u32,
+    #[serde(default = "default_loop_threshold")]
+    pub loop_threshold: u32,
+    #[serde(default = "default_loop_window")]
+    pub loop_window_seconds: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_calls() -> u32 {
+    60
+}
+
+fn default_loop_threshold() -> u32 {
+    5
+}
+
+fn default_loop_window() -> u64 {
+    15
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            max_calls_per_minute: default_max_calls(),
+            loop_threshold: default_loop_threshold(),
+            loop_window_seconds: default_loop_window(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WebhookConfig {
+    pub url: Option<String>,
+    #[serde(default = "default_webhook_timeout")]
+    pub timeout_seconds: u64,
+}
+
+fn default_webhook_timeout() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 [package]
 name = "propylon"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["xrwang <xrwang8@github.com>"]
 description = "The Monumental Security Gateway & WAF for Autonomous AI Agents and MCP Tools"
@@ -24,3 +24,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 colored = "2.1"
 anyhow = "1.0"
+arc-swap = "1.7"
+notify = "6.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

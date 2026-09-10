@@ -1,4 +1,5 @@
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -9,15 +10,19 @@ use axum::{
 use clap::Parser;
 use colored::Colorize;
 use propylon::{
+    breaker::{BreakerError, CircuitBreaker},
     config::Config,
-    policy::{request_terminal_approval, PolicyEngine},
+    policy::{dispatch_webhook_notification, request_terminal_approval, PolicyEngine},
     protocol::{
         CallToolParams, CallToolResult, Request, Response, ToolContent, CODE_APPROVAL_DENIED,
-        CODE_INVALID_PARAMS, CODE_PARSE_ERROR, CODE_POLICY_VIOLATION,
+        CODE_CIRCUIT_BROKEN, CODE_INVALID_PARAMS, CODE_PARSE_ERROR, CODE_POLICY_VIOLATION,
+        CODE_RATE_LIMITED,
     },
+    watcher::ConfigWatcher,
 };
 use serde_json::json;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
@@ -39,9 +44,18 @@ const BANNER: &str = r#"
 "#;
 
 #[derive(Parser, Debug)]
-#[command(name = "propylon", version = VERSION, about = "The Monumental Security Gateway for AI Agents")]
+#[command(
+    name = "propylon",
+    version = VERSION,
+    about = "The Monumental Security Gateway for AI Agents"
+)]
 struct Args {
-    #[arg(short, long, default_value = "configs/propylon.example.yaml", help = "Path to configuration file")]
+    #[arg(
+        short,
+        long,
+        default_value = "configs/propylon.example.yaml",
+        help = "Path to configuration file"
+    )]
     config: String,
 
     #[arg(short, long, help = "Override server bind address (e.g. 0.0.0.0:8080)")]
@@ -50,8 +64,9 @@ struct Args {
 
 #[derive(Clone)]
 struct AppState {
-    config: Arc<Config>,
-    policy_engine: Arc<PolicyEngine>,
+    config_path: PathBuf,
+    policy_engine: Arc<ArcSwap<PolicyEngine>>,
+    circuit_breaker: Arc<ArcSwap<CircuitBreaker>>,
 }
 
 #[tokio::main]
@@ -69,20 +84,33 @@ async fn main() -> Result<()> {
     println!("  Starting Propylon v{} in memory-safe Rust...\n", VERSION);
 
     // 2. Load Configuration
-    info!("Loading configuration from: {}", args.config);
-    let cfg = Config::load(&args.config)?;
+    let config_path = PathBuf::from(&args.config);
+    info!("Loading configuration from: {}", config_path.display());
+    let cfg = Config::load(&config_path)?;
     let bind_addr = args.addr.unwrap_or_else(|| cfg.server.addr.clone());
 
-    // 3. Initialize Policy Engine
+    // 3. Initialize Policy Engine & Circuit Breaker
     info!("Compiling {} security policies...", cfg.policies.len());
     let policy_engine = PolicyEngine::new(&cfg.policies)?;
+    let circuit_breaker = CircuitBreaker::new(cfg.circuit_breaker.clone());
+
+    let shared_engine = Arc::new(ArcSwap::from_pointee(policy_engine));
+    let shared_breaker = Arc::new(ArcSwap::from_pointee(circuit_breaker));
+
+    // 4. Spawn Zero-Downtime Hot-Reload Watcher
+    ConfigWatcher::spawn_watcher(
+        config_path.clone(),
+        shared_engine.clone(),
+        shared_breaker.clone(),
+    )?;
 
     let state = AppState {
-        config: Arc::new(cfg),
-        policy_engine: Arc::new(policy_engine),
+        config_path,
+        policy_engine: shared_engine,
+        circuit_breaker: shared_breaker,
     };
 
-    // 4. Build Axum HTTP Router
+    // 5. Build Axum HTTP Router
     let app = Router::new()
         .route("/healthz", get(health_check))
         .route("/v1/mcp", post(handle_mcp))
@@ -95,11 +123,16 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("Propylon Gateway listening on http://{}", addr);
     println!(
-        "{} Propylon Gateway is actively guarding AI tool invocations.\n",
+        "{} Propylon Gateway v{} is actively guarding AI tool invocations.",
+        "✓".green().bold(),
+        VERSION
+    );
+    println!(
+        "{} Live policy hot-reloading & agent loop circuit breaker active.\n",
         "✓".green().bold()
     );
 
-    // 5. Run Server with Graceful Shutdown
+    // 6. Run Server with Graceful Shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -150,18 +183,43 @@ async fn handle_mcp(
                 }
             };
 
-            if state.config.audit.enabled {
-                info!(
-                    tool = %call_params.name,
-                    args = ?call_params.arguments,
-                    "[Audit] Inspecting incoming Tool Call"
-                );
+            info!(
+                tool = %call_params.name,
+                args = ?call_params.arguments,
+                "Inspecting Tool Call"
+            );
+
+            // 1. Circuit Breaker Check (Loop & Rate-Limit protection)
+            let breaker = state.circuit_breaker.load();
+            if let Err(breaker_err) = breaker.check(&call_params.name, &call_params.arguments) {
+                match breaker_err {
+                    BreakerError::RateLimited { current, max } => {
+                        error!(tool = %call_params.name, current, max, "Rate limit exceeded");
+                        return Json(Response::error(
+                            req_id,
+                            CODE_RATE_LIMITED,
+                            breaker_err.to_string(),
+                        ));
+                    }
+                    BreakerError::LoopDetected { count, window_secs } => {
+                        error!(
+                            tool = %call_params.name,
+                            count,
+                            window_secs,
+                            "Agent dead loop detected"
+                        );
+                        return Json(Response::error(
+                            req_id,
+                            CODE_CIRCUIT_BROKEN,
+                            breaker_err.to_string(),
+                        ));
+                    }
+                }
             }
 
-            // Policy Evaluation
-            let decision = state
-                .policy_engine
-                .evaluate(&call_params.name, &call_params.arguments);
+            // 2. Lock-free Atomic Policy Evaluation
+            let engine = state.policy_engine.load();
+            let decision = engine.evaluate(&call_params.name, &call_params.arguments);
 
             if !decision.allowed {
                 if decision.require_approval {
@@ -169,7 +227,27 @@ async fn handle_mcp(
                         format!("Execution of tool '{}' requires confirmation.", call_params.name)
                     });
 
-                    let approved = request_terminal_approval(&prompt, Duration::from_secs(30)).await;
+                    // Optional webhook notification
+                    if let Some(channel) = &decision.approval_channel {
+                        if channel == "webhook" {
+                            if let Ok(cfg) = Config::load(&state.config_path) {
+                                if let Some(url) = cfg.webhook.url {
+                                    let _ = dispatch_webhook_notification(
+                                        &url,
+                                        &call_params.name,
+                                        &call_params.arguments,
+                                        &prompt,
+                                        Duration::from_secs(cfg.webhook.timeout_seconds),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                    }
+
+                    // Interactive Terminal Approval
+                    let approved =
+                        request_terminal_approval(&prompt, Duration::from_secs(30)).await;
                     if !approved {
                         warn!(tool = %call_params.name, "REJECTED by operator approval");
                         return Json(Response::error(
@@ -180,7 +258,9 @@ async fn handle_mcp(
                     }
                     info!(tool = %call_params.name, "APPROVED by operator");
                 } else {
-                    let reason = decision.reason.unwrap_or_else(|| "Security policy violation".into());
+                    let reason = decision
+                        .reason
+                        .unwrap_or_else(|| "Security policy violation".into());
                     let policy_id = decision.violated_policy.unwrap_or_default();
                     error!(
                         tool = %call_params.name,
@@ -213,16 +293,13 @@ async fn handle_mcp(
                 serde_json::to_value(result).unwrap(),
             ))
         }
-        _ => {
-            // Passthrough for tools/list, etc.
-            Json(Response::success(
-                req_id,
-                json!({
-                    "message": "Propylon Gateway pass-through (Rust)",
-                    "method": payload.method
-                }),
-            ))
-        }
+        _ => Json(Response::success(
+            req_id,
+            json!({
+                "message": "Propylon Gateway pass-through (Rust)",
+                "method": payload.method
+            }),
+        )),
     }
 }
 

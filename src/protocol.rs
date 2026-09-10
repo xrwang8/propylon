@@ -11,6 +11,8 @@ pub const CODE_INVALID_PARAMS: i32 = -32602;
 pub const CODE_POLICY_VIOLATION: i32 = -32001;
 pub const CODE_APPROVAL_DENIED: i32 = -32002;
 pub const CODE_APPROVAL_TIMEOUT: i32 = -32003;
+pub const CODE_CIRCUIT_BROKEN: i32 = -32004;
+pub const CODE_RATE_LIMITED: i32 = -32005;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
