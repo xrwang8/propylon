@@ -1,0 +1,26 @@
+[package]
+name = "propylon"
+version = "0.1.0"
+edition = "2021"
+authors = ["xrwang <xrwang8@github.com>"]
+description = "The Monumental Security Gateway & WAF for Autonomous AI Agents and MCP Tools"
+license = "Apache-2.0"
+repository = "https://github.com/xrwang8/propylon"
+readme = "README.md"
+keywords = ["ai", "agent", "mcp", "security", "gateway"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+tokio = { version = "1.40", features = ["full"] }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+regex = "1.10"
+clap = { version = "4.5", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+colored = "2.1"
+anyhow = "1.0"

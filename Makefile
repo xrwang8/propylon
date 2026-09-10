@@ -1,32 +1,35 @@
 BINARY_NAME=propylon
-CMD_DIR=./cmd/propylon
-BUILD_DIR=./bin
+TARGET_DIR=./target/release
 
-.PHONY: all build run test clean lint help
+.PHONY: all build run test clean check help
 
 all: build
 
 build:
-	@echo "==> Building $(BINARY_NAME)..."
-	@mkdir -p $(BUILD_DIR)
-	go build -ldflags="-s -w" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/main.go
-	@echo "==> Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "==> Building $(BINARY_NAME) (Rust Release)..."
+	cargo build --release
+	@echo "==> Binary ready: $(TARGET_DIR)/$(BINARY_NAME)"
 
-run: build
-	@echo "==> Running $(BINARY_NAME)..."
-	$(BUILD_DIR)/$(BINARY_NAME) --config ./configs/propylon.example.yaml
+run:
+	@echo "==> Running $(BINARY_NAME) with example configuration..."
+	cargo run -- --config configs/propylon.example.yaml
 
 test:
 	@echo "==> Running tests..."
-	go test -v ./...
+	cargo test
+
+check:
+	@echo "==> Checking compilation..."
+	cargo check
 
 clean:
-	@echo "==> Cleaning up..."
-	rm -rf $(BUILD_DIR)
+	@echo "==> Cleaning build artifacts..."
+	cargo clean
 
 help:
 	@echo "Usage: make [target]"
-	@echo "  build   Build binary"
-	@echo "  run     Build and run with example config"
-	@echo "  test    Run unit tests"
-	@echo "  clean   Remove build artifacts"
+	@echo "  build   Compile optimized release binary"
+	@echo "  run     Run gateway with example configuration"
+	@echo "  test    Execute unit & integration tests"
+	@echo "  check   Fast type and borrow check"
+	@echo "  clean   Remove cargo target directory"

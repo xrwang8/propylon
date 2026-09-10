@@ -4,12 +4,12 @@
 ### The Monumental Security Gateway & WAF for Autonomous AI Agents
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)](https://golang.org)
+[![Rust Version](https://img.shields.io/badge/Rust-1.80%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Status](https://img.shields.io/badge/Status-Alpha-orange.svg)]()
 
 **Don't let autonomous AI agents run wild in production.**  
-*An ultra-fast, single-binary security gateway, proxy, and behavioral firewall for Model Context Protocol (MCP) and agentic tool invocations.*
+*An ultra-fast, memory-safe Rust security gateway, proxy, and behavioral firewall for Model Context Protocol (MCP) and agentic tool invocations.*
 
 [Quick Start](#-quick-start-in-60-seconds) • [Architecture](#-architecture) • [Key Features](#-key-features) • [Configuration](#-configuration) • [Roadmap](#-roadmap)
 
@@ -49,7 +49,7 @@ flowchart LR
         A3[Custom LangGraph / AutoGen]
     end
 
-    subgraph Propylon_Gateway ["🏛️ Propylon Security Gateway (Go)"]
+    subgraph Propylon_Gateway ["🏛️ Propylon Security Gateway (Rust / Tokio / Axum)"]
         direction TB
         P1[Protocol Interceptor / JSON-RPC]
         P2{Policy & Guardrails Engine}
@@ -79,9 +79,10 @@ flowchart LR
 
 ## ✨ Key Features
 
+- 🦀 **100% Memory-Safe Rust Core**: Engineered with Tokio and Axum for zero-cost abstractions, zero garbage collection pauses, and predictable sub-millisecond inspection latency.
 - 🛡️ **Zero-Trust Tool Firewalls**: Inspect tool parameters at the AST and regex level before execution. Block destructive shell commands (`rm -rf`, `mkfs`) and irreversible SQL (`DROP TABLE`, `TRUNCATE`).
 - 🚦 **Interactive Human-in-the-Loop (HITL)**: Automatically hold high-risk requests (e.g., financial transactions, production deployments) and request interactive approval in your terminal or via webhooks (Slack/Feishu).
-- ⚡ **Blazing Fast & Single-Binary**: Written in Go with zero external runtime dependencies. Sub-millisecond inspection latency; easily deployed via Docker, Kubernetes, or as a standalone CLI.
+- ⚡ **Single Static Binary**: Compiles to a self-contained, dependency-free native binary. Drop it directly into Docker, Kubernetes pods, or developer workstations.
 - 🎭 **Data Loss Prevention (DLP)**: Automatically detect and redact sensitive data (API keys, passwords, PII) in tool outputs before returning them to LLMs.
 - 📜 **Tamper-Evident Audit Logging**: Comprehensive telemetry tracking every agent trajectory, tool invocation, argument hash, and outcome for post-mortem analysis and compliance.
 
@@ -96,7 +97,7 @@ flowchart LR
 git clone https://github.com/xrwang8/propylon.git
 cd propylon
 
-# Build and start the gateway using the example policy
+# Build and start the gateway using cargo / make
 make run
 ```
 
@@ -110,10 +111,10 @@ You will see the gateway start up on `http://127.0.0.1:8080`:
  |_|   |_|  \___/| .__/ \__, |_|\___/|_| |_|
                  |_|    |___/               
     The Core Security Gateway & Firewall for AI Agents
-    Version: 0.1.0-alpha | Greek Origin: Προπύλαιον
+    Engine: Memory-Safe Rust | Origin: Προπύλαιον
 ------------------------------------------------------------
 [Propylon] Gateway listening on http://0.0.0.0:8080 (mode: http)
-[Ready] Propylon Gateway is actively guarding AI tool invocations.
+✓ Propylon Gateway is actively guarding AI tool invocations.
 ```
 
 ### 2. Test Dangerous Command Interception
@@ -189,7 +190,7 @@ policies:
 
 ## 🗺️ Roadmap
 
-- [x] **v0.1.0**: Core HTTP JSON-RPC gateway & regex parameter firewall.
+- [x] **v0.1.0**: Core Rust/Axum HTTP JSON-RPC gateway & regex parameter firewall.
 - [x] **v0.1.0**: Interactive terminal Human-in-the-Loop approval mechanism.
 - [ ] **v0.2.0**: Native `stdio` transport proxying (direct bridge for Claude Desktop).
 - [ ] **v0.2.0**: Webhook-based approval channels (Slack, Discord, Feishu, Teams).
